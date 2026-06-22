@@ -5,6 +5,8 @@ use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
+use esp_hal::i2c::master::{Config, I2c};
+use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
 
@@ -12,6 +14,7 @@ use esp_println as _;
 fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
+
 
 #[allow(non_camel_case_types)]
 #[repr(u16)] // <--- We need this to make sure it detects it as a u8 and not a isize
@@ -1204,6 +1207,111 @@ pub enum regAddr
   SHADOW_PHASECAL_RESULT__REFERENCE_PHASE_HI                                 = 0x0FFE,
   SHADOW_PHASECAL_RESULT__REFERENCE_PHASE_LO                                 = 0x0FFF,
 }
+pub enum DistanceMode { Short, Medium, Long, Unknown }
+
+
+pub enum RangeStatus{
+    RangeValid                =   0,
+
+      // "sigma estimator check is above the internal defined threshold"
+      // (sigma = standard deviation of measurement)
+      SigmaFail                 =   1,
+
+      // "signal value is below the internal defined threshold"
+      SignalFail                =   2,
+
+      // "Target is below minimum detection threshold."
+      RangeValidMinRangeClipped =   3,
+
+      // "phase is out of bounds"
+      // (nothing detected in range; try a longer distance mode if applicable)
+      OutOfBoundsFail           =   4,
+
+      // "HW or VCSEL failure"
+      HardwareFail              =   5,
+
+      // "The Range is valid but the wraparound check has not been done."
+      RangeValidNoWrapCheckFail =   6,
+
+      // "Wrapped target, not matching phases"
+      // "no matching phase in other VCSEL period timing."
+      WrapTargetFail            =   7,
+
+      // "Internal algo underflow or overflow in lite ranging."
+   // ProcessingFail            =   8: not used in API
+
+      // "Specific to lite ranging."
+      // should never occur with this lib (which uses low power auto ranging,
+      // as the API does)
+      XtalkSignalFail           =   9,
+
+      // "1st interrupt when starting ranging in back to back mode. Ignore
+      // data."
+      // should never occur with this lib
+      SynchronizationInt         =  10, // (the API spells this "syncronisation")
+
+      // "All Range ok but object is result of multiple pulses merging together.
+      // Used by RQL for merged pulse detection"
+   // RangeValid MergedPulse    =  11: not used in API
+
+      // "Used by RQL as different to phase fail."
+   // TargetPresentLackOfSignal =  12:
+
+      // "Target is below minimum detection threshold."
+      MinRangeFail              =  13,
+
+      // "The reported range is invalid"
+   // RangeInvalid              =  14: can't actually be returned by API (range can never become negative, even after correction)
+
+      // "No Update."
+      None                      = 255,
+}
+
+
+
+struct Vl53l1x{
+    vl53l1x_i2c: I2c<'static, esp_hal::Async>,
+    range_mm : u16,
+    range_status : RangeStatus,
+    peak_signal_count_rate_mcps : f64,
+    ambient_count_rate_mcps : f64,
+    init:bool,
+}
+
+
+impl  Vl53l1x{
+    async fn new() -> Self{
+        Self {vl53l1x_i2c,range_mm:0,peak_signal_count_rate_mcps:0,ambient_count_rate_mcps:0,range_status:0,init:true} // creates the new vl53l1x driver
+    }
+
+    async fn write_reg(reg: u16,value: u8){
+        todo!()
+    }
+    async fn write_reg_16_bit(reg:u16,value:u16){
+        todo!()
+    }
+
+    async fn write_reg_32_bit(reg:u16,value:u32){
+        todo!()
+    }
+    /*
+        uint8_t readReg(regAddr reg); CPP CODE TO RUST     async fn read_reg(reg:regAddr) -> u8{} 
+        the uint8_t means that it has a value so it is like a return
+     */
+    async fn read_reg(reg:regAddr) -> u8{
+        todo!()
+    }
+    async fn read_reg_16_bit(reg:u16) -> u16{
+        todo!()
+    }
+    async fn read_reg(reg:u32) -> u32{
+        todo!()
+    }
+
+    CONTINUE FROM LINE 1289 https://github.com/pololu/vl53l1x-arduino/blob/master/VL53L1X.h#L1284
+
+}
+
 
 
 #[esp_hal_embassy::main]
@@ -1220,6 +1328,8 @@ async fn main(spawner: Spawner) {
 
     // TODO: Spawn some tasks
     let _ = spawner;
+    let vl53l1x_i2c: I2c<'static, esp_hal::Async> = I2c::new(peripherals.I2C0, Config::default().with_frequency(Rate::from_khz(400))
+).unwrap().with_scl(peripherals.GPIO22).with_sda(peripherals.GPIO21).into_async();
 
 
 
