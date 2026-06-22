@@ -1276,39 +1276,52 @@ struct Vl53l1x{
     peak_signal_count_rate_mcps : f64,
     ambient_count_rate_mcps : f64,
     init:bool,
+    distance_mode: DistanceMode,
 }
 
 
 impl  Vl53l1x{
     async fn new() -> Self{
-        Self {vl53l1x_i2c,range_mm:0,peak_signal_count_rate_mcps:0,ambient_count_rate_mcps:0,range_status:0,init:true} // creates the new vl53l1x driver
+        Self {vl53l1x_i2c,range_mm:0,peak_signal_count_rate_mcps:0,ambient_count_rate_mcps:0,range_status:0,init:true,distance_mode} // creates the new vl53l1x driver
     }
 
-    async fn write_reg(reg: u16,value: u8){
+    async fn write_reg(&mut self,reg: u16,value: u8){
         todo!()
     }
-    async fn write_reg_16_bit(reg:u16,value:u16){
+    async fn write_reg_16_bit(&mut self,reg:u16,value:u16){
         todo!()
     }
 
-    async fn write_reg_32_bit(reg:u16,value:u32){
+    async fn write_reg_32_bit(&mut self,reg:u16,value:u32){
         todo!()
     }
     /*
         uint8_t readReg(regAddr reg); CPP CODE TO RUST     async fn read_reg(reg:regAddr) -> u8{} 
         the uint8_t means that it has a value so it is like a return
      */
-    async fn read_reg(reg:regAddr) -> u8{
+    async fn read_reg(&mut self,reg:regAddr) -> u8{
         todo!()
     }
-    async fn read_reg_16_bit(reg:u16) -> u16{
+    async fn read_reg_16_bit(&mut self,reg:u16) -> u16{
         todo!()
     }
-    async fn read_reg(reg:u32) -> u32{
+    async fn read_reg_32_bit(&mut self,reg:u32) -> u32{
         todo!()
     }
 
-    CONTINUE FROM LINE 1289 https://github.com/pololu/vl53l1x-arduino/blob/master/VL53L1X.h#L1284
+    async fn init(&mut self,io_2v8:bool){
+        todo!() // here change the self.init to the io_2v8 value
+    }
+
+    async fn set_distance_mode(&mut self,mode:DistanceMode) -> bool{
+        todo!()
+    }
+    
+    async fn get_distance_mode(&mut self) -> DistanceMode{
+        self.distance_mode
+    }
+
+    CONTINUE FROM LINE 1293  https://github.com/pololu/vl53l1x-arduino/blob/master/VL53L1X.h#L1293C1-L1293C57
 
 }
 
