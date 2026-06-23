@@ -1277,12 +1277,14 @@ struct Vl53l1x{
     ambient_count_rate_mcps : f64,
     init:bool,
     distance_mode: DistanceMode,
+    blocking:bool
 }
+
 
 
 impl  Vl53l1x{
     async fn new() -> Self{
-        Self {vl53l1x_i2c,range_mm:0,peak_signal_count_rate_mcps:0,ambient_count_rate_mcps:0,range_status:0,init:true,distance_mode} // creates the new vl53l1x driver
+        Self {vl53l1x_i2c,range_mm:0,peak_signal_count_rate_mcps:0,ambient_count_rate_mcps:0,range_status:0,init:true,distance_mode,blocking:true} // creates the new vl53l1x driver
     }
 
     async fn write_reg(&mut self,reg: u16,value: u8){
@@ -1321,7 +1323,61 @@ impl  Vl53l1x{
         self.distance_mode
     }
 
-    CONTINUE FROM LINE 1293  https://github.com/pololu/vl53l1x-arduino/blob/master/VL53L1X.h#L1293C1-L1293C57
+    async fn set_mesurement_timing_budget(&mut self,budget_us:u32) -> bool{
+        todo!()
+    }
+
+    async fn get_mesurement_timing_budget(&mut self)-> u32{
+        todo!()
+    }
+
+    async fn set_roi_size(&mut self,width:u8,height:u8){
+        todo!()
+    }
+    /*
+        void getROISize(uint8_t * width, uint8_t * height); C++ -> Rust    fn get_roi_size(&mut self,width : &mut u8, height: &mut u8)
+        the * means a pointer but in rust due to memory safety we can't have normal pointers
+
+     */
+    async fn get_roi_size(&mut self,width : &mut u8, height: &mut u8){
+        todo!()
+    }
+
+    async fn set_roi_center(&mut self, spad_num:u8){
+        todo!()
+    }
+
+    async fn get_roi_center(&mut self) -> u8{
+        todo!()
+    }
+
+    async fn start_continuous(&mut self, period_ms:u8){
+        todo!()
+    }
+
+    async fn stop_continous(&mut self){
+        todo!()
+    }
+
+    async fn read(&mut self, blocking:bool) -> u16{
+        todo!()
+    }
+
+    async fn read_range_continous_milimeters(&mut self,blocking:bool ) -> u16{
+        RETURN READ BLOCKING
+
+        todo!()
+    }
+
+    async fn read_single(&mut self,blocking:bool) -> u16{
+        todo!()
+    }
+
+    async fn read_range_single_milimeters(&mut self,blocking:bool) -> u16{
+        todo!()
+        RETURN REAADSINGLE BLOCKING
+    }
+    Line 1306
 
 }
 
