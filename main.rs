@@ -6,9 +6,10 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::{Config, I2c};
-use esp_hal::time::Rate;
+use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
+use regAddr::{ALGO__CONSISTENCY_CHECK__TOLERANCE, ALGO__PART_TO_PART_RANGE_OFFSET_MM, ALGO__RANGE_IGNORE_VALID_HEIGHT_MM, ALGO__RANGE_MIN_CLIP, DSS_CONFIG__APERTURE_ATTENUATION, GPIO__TIO_HV_STATUS, I2C_SLAVE__DEVICE_ADDRESS, MM_CONFIG__OUTER_OFFSET_MM, OSC_MEASURED__FAST_OSC__FREQUENCY, SIGMA_ESTIMATOR__EFFECTIVE_AMBIENT_WIDTH_NS, SIGMA_ESTIMATOR__EFFECTIVE_PULSE_WIDTH_NS, SYSTEM__THRESH_RATE_HIGH, SYSTEM__THRESH_RATE_LOW_LO};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -1204,6 +1205,7 @@ pub mod regAddr {
     pub const SHADOW_RESULT_CORE__SPARE_0: u16 = 0x0FFC;
     pub const SHADOW_PHASECAL_RESULT__REFERENCE_PHASE_HI: u16 = 0x0FFE;
     pub const SHADOW_PHASECAL_RESULT__REFERENCE_PHASE_LO: u16 = 0x0FFF;
+    pub const Target_Rate : u16 = 0x0a00;
 }
 
 
@@ -1279,6 +1281,17 @@ struct Vl53l1x{
     distance_mode: DistanceMode,
     blocking:bool,
     io_timeout : u16,
+
+    address:u8,
+    did_timeout : bool,
+    timeout_start_ms :u16,
+    fast_osc_frequency:u16,
+    osc_calibrate_val : u16,
+    calibrated:bool,
+    saved_vhv_init:u8,
+    saved_vhv_timeout:u8,
+
+
 }
 
 
@@ -1287,8 +1300,18 @@ impl  Vl53l1x{
     async fn new(vl53l1x_i2c: I2c<'static, esp_hal::Async>, distance_mode: DistanceMode) -> Self {
         Self { vl53l1x_i2c, range_mm: 0, peak_signal_count_rate_mcps: 0.0,
                ambient_count_rate_mcps: 0.0, range_status: RangeStatus::None,
-               init: true, distance_mode, blocking: true,io_timeout:0 }
+               init: true, distance_mode, blocking: true,io_timeout:0,
+            address:0,did_timeout:false,timeout_start_ms:0,fast_osc_frequency:0,osc_calibrate_val:0,calibrated:false,saved_vhv_init:0,saved_vhv_timeout:0}
     }
+
+
+    async fn set_address(&mut self,new_addr:u8){
+        self.write_reg(I2C_SLAVE__DEVICE_ADDRESS, new_addr & 0x7f).await;
+        self.address = new_addr;
+    }
+
+
+
 
     async fn write_reg(&mut self,reg: u16,value: u8){
         todo!()
@@ -1314,8 +1337,88 @@ impl  Vl53l1x{
         todo!()
     }
 
-    async fn init(&mut self,io_2v8:bool){
-        todo!() // here change the self.init to the io_2v8 value
+    async fn init(&mut self,io_2v8:bool) ->bool{
+        // todo!() // here change the self.init to the io_2v8 value
+        if self.read_reg_16_bit(regAddr::IDENTIFICATION__MODEL_ID).await != 0xEACC{
+            return false
+        }
+        self.write_reg(regAddr::SOFT_RESET, 0x00).await;
+        Timer::after(Duration::from_micros(100)).await;
+        self.write_reg(regAddr::SOFT_RESET, 0x01).await;
+          // give it some time to boot; otherwise the sensor NACKs during the read_reg()
+        Timer::after(Duration::from_secs(1)).await;
+
+        Instant::now();
+
+        while (self.read_reg(regAddr::FIRMWARE__SYSTEM_STATUS).await & 0x01) == 0{
+            if self.check_time_out_expired().await{
+                self.did_timeout= true;
+                return false
+            }
+        }
+
+    if io_2v8{
+        let value = self.read_reg(regAddr::PAD_I2C_HV__EXTSUP_CONFIG).await;
+        self.write_reg(regAddr::PAD_I2C_HV__EXTSUP_CONFIG,  value | 0x01).await;
+    }
+
+    self.fast_osc_frequency = self.read_reg_16_bit(regAddr::OSC_MEASURED__FAST_OSC__FREQUENCY).await;
+    self.osc_calibrate_val = self.read_reg_16_bit(regAddr::RESULT__OSC_CALIBRATE_VAL).await;
+
+
+    self.write_reg_16_bit(regAddr::DSS_CONFIG__TARGET_TOTAL_RATE_MCPS, regAddr::Target_Rate).await;
+    self.write_reg(regAddr::GPIO__TIO_HV_STATUS, 0x02).await;
+    self.write_reg(regAddr::SIGMA_ESTIMATOR__EFFECTIVE_PULSE_WIDTH_NS, 8).await; // tuning parm default
+    self.write_reg(regAddr::SIGMA_ESTIMATOR__EFFECTIVE_AMBIENT_WIDTH_NS, 16).await; // tuning parm default
+    self.write_reg(regAddr::ALGO__RANGE_IGNORE_VALID_HEIGHT_MM, 0xFF).await;
+    self.write_reg(regAddr::ALGO__RANGE_MIN_CLIP, 0).await; // tuning parm default
+    self.write_reg(regAddr::ALGO__CONSISTENCY_CHECK__TOLERANCE, 2).await; // tuning parm default
+
+
+    // general config
+    self.write_reg_16_bit(regAddr::SYSTEM__THRESH_RATE_HIGH, 0x0000).await;
+    self.write_reg_16_bit(regAddr::SYSTEM__THRESH_RATE_LOW, 0x0000).await;
+    self.write_reg(regAddr::DSS_CONFIG__APERTURE_ATTENUATION, 0x38).await;
+
+    // timing config
+    // most of these settings will be determined later by distance and timing
+    // budget configuration
+    self.write_reg_16_bit(regAddr::RANGE_CONFIG__SIGMA_THRESH, 360).await; // tuning parm default
+    self.write_reg_16_bit(regAddr::RANGE_CONFIG__MIN_COUNT_RATE_RTN_LIMIT_MCPS, 192).await;// tuning parm default
+ 
+    // dynamic config
+    self.write_reg(regAddr::SYSTEM__GROUPED_PARAMETER_HOLD_0, 0x01).await;
+    self.write_reg(regAddr::SYSTEM__GROUPED_PARAMETER_HOLD_1, 0x01).await;
+    self.write_reg(regAddr::SD_CONFIG__QUANTIFIER, 2).await; // tuning parm default
+    
+
+    self.write_reg(regAddr::SYSTEM__GROUPED_PARAMETER_HOLD, 0x00).await;
+    self.write_reg(regAddr::SYSTEM__SEED_CONFIG, 1).await;
+
+    //from Vl53l1x_config_low_power_auto_mode
+    self.write_reg(regAddr::SYSTEM__SEQUENCE_CONFIG, 0x8B).await; // VHV, PHASECAL, DSS1, RANGE
+    self.write_reg_16_bit(regAddr::DSS_CONFIG__MANUAL_EFFECTIVE_SPADS_SELECT, 200 << 8 ).await;
+    self.write_reg(regAddr::DSS_CONFIG__ROI_MODE_CONTROL, 2).await; // Requested_effective_spads
+
+
+    //
+    
+    self.set_distance_mode(DistanceMode::Long).await;
+    self.set_mesurement_timing_budget(5000).await;
+
+
+    // mesurement is started ; assuemes MM1 and MM2 are disabled
+    let value = self.read_reg_16_bit(regAddr::MM_CONFIG__OUTER_OFFSET_MM).await;
+    self.write_reg_16_bit(regAddr::ALGO__PART_TO_PART_RANGE_OFFSET_MM, value * 4).await;
+
+
+    true
+    }
+
+
+
+    async fn check_time_out_expired(&mut self) ->bool{
+        todo!()
     }
 
     async fn set_distance_mode(&mut self,mode:DistanceMode) -> bool{
@@ -1402,7 +1505,7 @@ impl  Vl53l1x{
         todo!()
     }
 
-    CONTINE FROM LINE 1318
+
 
 }
 
