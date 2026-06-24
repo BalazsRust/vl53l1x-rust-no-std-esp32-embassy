@@ -1351,12 +1351,45 @@ impl  Vl53l1x{
         the uint8_t means that it has a value so it is like a return
      */
     async fn read_reg(&mut self,reg:u16) -> u8{ // takes regaddr as an argument
-        todo!()
+        let mut buffer = [0u8;1];
+        let value_writting_reading = self.vl53l1x_i2c.write_read_async(self.address, &[(reg >> 8) as u8, // reg high byte
+         reg as u8], // reg low byte
+         &mut buffer).await; // reading the value into buffer 
+        
+        match value_writting_reading {
+            Ok(_) =>{
+                return buffer[0]; // returning the value
+            }
+            Err(_) =>{
+                return 0;
+            }
+        }
+
     }
+
     async fn read_reg_16_bit(&mut self,reg:u16) -> u16{
+        let mut buffer = [0u8;2];
+        let value_writting_reading = self.vl53l1x_i2c.write_read_async(self.address, &[(reg >> 8) as u8, // reg high byte
+         reg as u8], // reg low byte
+         &mut buffer).await; // reading the value into buffer 
+        
+        match value_writting_reading {
+            Ok(_) =>{
+                
+                let value = (buffer[0] as u16) << 8 | (buffer[1] as u16);
+                return value;
+                // returning the value
+            }
+            Err(_) =>{
+                return 0;
+            }
+        }
+
+
         todo!()
     }
     async fn read_reg_32_bit(&mut self,reg:u32) -> u32{
+        continue from line 229
         todo!()
     }
 
