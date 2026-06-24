@@ -1313,15 +1313,38 @@ impl  Vl53l1x{
 
 
 
-    async fn write_reg(&mut self,reg: u16,value: u8){
-        todo!()
+    async fn write_reg(&mut self,reg: u16,value: u8)-> Option<bool>{ // returning false if something went south
+        let value_writting = self.vl53l1x_i2c.write_async(self.address, &[(reg >> 8) as u8, reg as u8,value]).await;
+        match value_writting {Ok(_) =>{}Err(_) =>{return Some(false)}}
+        // returning true if everything succeded
+        Some(true)
     }
-    async fn write_reg_16_bit(&mut self,reg:u16,value:u16){
-        todo!()
+    async fn write_reg_16_bit(&mut self,reg:u16,value:u16) -> Option<bool>{
+        let value_writting = self.vl53l1x_i2c.write_async(self.address,
+             &[(reg >> 8) as u8, // reg high byte
+              reg as u8, // reg low byte
+              (value >> 8) as u8, // vlaue high byte
+              value as u8]).await; // value low byte
+
+        match value_writting {Ok(_) =>{}Err(_) =>{return Some(false)}}
+        // returning true if everything succeded
+        Some(true)
     }
 
-    async fn write_reg_32_bit(&mut self,reg:u16,value:u32){
-        todo!()
+    async fn write_reg_32_bit(&mut self,reg:u16,value:u32) -> Option<bool>{
+        let value_writting = self.vl53l1x_i2c.write_async(self.address, 
+            &[(reg >> 8) as u8, // reg high byte
+             reg as u8, // reg low byte
+             (value >> 24) as u8, // value highest byte
+             (value >> 16) as u8,
+             (value >> 8) as u8,
+             value as u8]).await; // value lowest byte
+
+            match value_writting {Ok(_) =>{}Err(_) =>{return Some(false)}}
+            // returning true if everything succeded
+            Some(true)
+
+
     }
     /*
         uint8_t readReg(regAddr reg); CPP CODE TO RUST     async fn read_reg(reg:regAddr) -> u8{} 
@@ -1414,6 +1437,7 @@ impl  Vl53l1x{
 
     true
     }
+
 
 
 
