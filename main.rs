@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
@@ -9,7 +10,7 @@ use esp_hal::i2c::master::{Config, I2c};
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
-use regAddr::{ALGO__CONSISTENCY_CHECK__TOLERANCE, ALGO__PART_TO_PART_RANGE_OFFSET_MM, ALGO__RANGE_IGNORE_VALID_HEIGHT_MM, ALGO__RANGE_MIN_CLIP, DSS_CONFIG__APERTURE_ATTENUATION, GPIO__TIO_HV_STATUS, I2C_SLAVE__DEVICE_ADDRESS, MM_CONFIG__OUTER_OFFSET_MM, OSC_MEASURED__FAST_OSC__FREQUENCY, SIGMA_ESTIMATOR__EFFECTIVE_AMBIENT_WIDTH_NS, SIGMA_ESTIMATOR__EFFECTIVE_PULSE_WIDTH_NS, SYSTEM__THRESH_RATE_HIGH, SYSTEM__THRESH_RATE_LOW_LO};
+use regAddr::{Timing_Guard, ALGO__CONSISTENCY_CHECK__TOLERANCE, ALGO__PART_TO_PART_RANGE_OFFSET_MM, ALGO__RANGE_IGNORE_VALID_HEIGHT_MM, ALGO__RANGE_MIN_CLIP, DSS_CONFIG__APERTURE_ATTENUATION, GPIO__TIO_HV_STATUS, I2C_SLAVE__DEVICE_ADDRESS, MM_CONFIG__OUTER_OFFSET_MM, OSC_MEASURED__FAST_OSC__FREQUENCY, SIGMA_ESTIMATOR__EFFECTIVE_AMBIENT_WIDTH_NS, SIGMA_ESTIMATOR__EFFECTIVE_PULSE_WIDTH_NS, SYSTEM__THRESH_RATE_HIGH, SYSTEM__THRESH_RATE_LOW_LO};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -1206,6 +1207,7 @@ pub mod regAddr {
     pub const SHADOW_PHASECAL_RESULT__REFERENCE_PHASE_HI: u16 = 0x0FFE;
     pub const SHADOW_PHASECAL_RESULT__REFERENCE_PHASE_LO: u16 = 0x0FFF;
     pub const Target_Rate : u16 = 0x0a00;
+    pub const Timing_Guard: u32 = 4528;
 }
 
 
@@ -1565,9 +1567,84 @@ impl  Vl53l1x{
         self.distance_mode
     }
 
-    async fn set_mesurement_timing_budget(&mut self,budget_us:u32) -> bool{
+    async fn set_mesurement_timing_budget(&mut self,mut budget_us:u32) -> bool{
+        // assumes PresetMode is LOWPOWER_AUTONOMOUS
+        let timing_guard: u32 = regAddr::Timing_Guard;
+        if budget_us <= timing_guard{
+        
+            return false;
+        }
+
+        let budget_us = budget_us - timing_guard;
+        let mut range_config_timeout_us: u32  = budget_us;
+        if range_config_timeout_us > 1100000 { return false; }
+
+        range_config_timeout_us /= 2;
+
+        let value = self.read_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_A).await;
+        let macro_period_us : u32 =  self.calc_macro_period(value).await;
+
+
+        let mut  phasecal_timeout_mclks = self.timeout_microseconds_to_mclks(1000, macro_period_us).await;
+
+        if phasecal_timeout_mclks > 0xFF{
+            phasecal_timeout_mclks = 0xFF
+        }
+        self.write_reg(regAddr::PHASECAL_CONFIG__TIMEOUT_MACROP, phasecal_timeout_mclks as u8).await; // ther is something wrong // todo!!
+
+
+        let value_timeout_microsecs_to_mclks = self.timeout_microseconds_to_mclks(1, macro_period_us).await;
+        let encode_timeout = self.encode_timeout(value_timeout_microsecs_to_mclks).await;
+            // "Update MM Timing A timeout"
+    // Timeout of 1 is tuning parm default (LOWPOWERAUTO_MM_CONFIG_TIMEOUT_US_DEFAULT)
+    // via VL53L1_get_preset_mode_timing_cfg(). With the API, the register
+    // actually ends up with a slightly different value because it gets assigned,
+    // retrieved, recalculated with a different macro period, and reassigned,
+    // but it probably doesn't matter because it seems like the MM ("mode
+    // mitigation"?) sequence steps are disabled in low power auto mode anyway.
+    
+        self.write_reg_16_bit(regAddr::MM_CONFIG__TIMEOUT_MACROP_A, encode_timeout).await;
+
+  // "Update Range Timing A timeout"
+    let value_timeout_microsecs_to_mclks = self.timeout_microseconds_to_mclks(range_config_timeout_us, macro_period_us).await;
+    let encode_timeout = self.encode_timeout(value_timeout_microsecs_to_mclks).await;
+    self.write_reg_16_bit(regAddr::RANGE_CONFIG__TIMEOUT_MACROP_A, encode_timeout).await;
+
+    
+    let range_config_value = self.read_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_B).await;
+    let macro_period_us = self.calc_macro_period(range_config_value).await;
+
+          // "Update MM Timing B timeout"
+  // (See earlier comment about MM Timing A timeout.)
+    let value_timeout_microsecs_to_mclks = self.timeout_microseconds_to_mclks(range_config_timeout_us, macro_period_us).await;
+    let encode_timeout = self.encode_timeout(value_timeout_microsecs_to_mclks).await;
+
+    self.write_reg_16_bit(regAddr::MM_CONFIG__TIMEOUT_MACROP_B, encode_timeout).await;
+
+
+  // "Update Range Timing B timeout"
+  let value_timeout_microsecs_to_mclks = self.timeout_microseconds_to_mclks(range_config_timeout_us, macro_period_us).await;
+  let encode_timeout = self.encode_timeout(value_timeout_microsecs_to_mclks).await;
+
+  self.write_reg_16_bit(regAddr::RANGE_CONFIG__TIMEOUT_MACROP_B, encode_timeout).await;
+
+  true
+
+
+    
+}
+
+    async  fn encode_timeout(&mut self, timeout_mclks : u32) -> u16{
         todo!()
     }
+
+    async fn timeout_microseconds_to_mclks(&mut self, timeout_us : u32,macro_period_us : u32) -> u32{
+        todo!()
+    }
+    async fn calc_macro_period(&mut self , vcsel_period: u8) -> u32{
+        todo!()
+    }
+
 
     async fn get_mesurement_timing_budget(&mut self)-> u32{
         todo!()
