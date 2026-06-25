@@ -1386,11 +1386,25 @@ impl  Vl53l1x{
         }
 
 
-        todo!()
     }
     async fn read_reg_32_bit(&mut self,reg:u32) -> u32{
-        continue from line 229
-        todo!()
+        let mut buffer = [0u8;4];
+        let value_writting_reading = self.vl53l1x_i2c.write_read_async(self.address, &[(reg >> 8) as u8, // reg high byte
+         reg as u8], // reg low byte
+         &mut buffer).await; // reading the value into buffer 
+        
+        match value_writting_reading {
+            Ok(_) =>{
+                
+                let value = (buffer[0] as u32) << 24 |(buffer[1] as u32) << 16 | (buffer[2] as u32) << 8 | (buffer[3] as u32);
+                return value;
+                // returning the value
+            }
+            Err(_) =>{
+                return 0;
+            }
+        }
+
     }
 
     async fn init(&mut self,io_2v8:bool) ->bool{
@@ -1479,7 +1493,72 @@ impl  Vl53l1x{
     }
 
     async fn set_distance_mode(&mut self,mode:DistanceMode) -> bool{
-        todo!()
+
+        let budget_us = self.get_mesurement_timing_budget().await;
+
+        match mode{
+            DistanceMode::Short =>{
+                // timing config short range
+
+                self.write_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_A, 0x07).await;
+                self.write_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_B, 0x05).await;
+                self.write_reg(regAddr::RANGE_CONFIG__VALID_PHASE_HIGH, 0x38).await;
+
+
+                // dynamic config
+                self.write_reg(regAddr::SD_CONFIG__WOI_SD0, 0x07).await;
+                self.write_reg(regAddr::SD_CONFIG__WOI_SD1, 0x05).await;
+                self.write_reg(regAddr::SD_CONFIG__INITIAL_PHASE_SD0, 6).await;
+                self.write_reg(regAddr::SD_CONFIG__INITIAL_PHASE_SD1, 6).await;
+
+                // no need for brakes like in cpp since rust is much better 
+                
+            }
+            DistanceMode::Medium =>{
+                                // timing config standard range
+
+                self.write_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_A, 0x0B).await;
+                self.write_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_B, 0x09).await;
+                self.write_reg(regAddr::RANGE_CONFIG__VALID_PHASE_HIGH, 0x78).await;
+
+
+                // dynamic config
+                self.write_reg(regAddr::SD_CONFIG__WOI_SD0, 0x0B).await;
+                self.write_reg(regAddr::SD_CONFIG__WOI_SD1, 0x09).await;
+                self.write_reg(regAddr::SD_CONFIG__INITIAL_PHASE_SD0, 10).await;
+                self.write_reg(regAddr::SD_CONFIG__INITIAL_PHASE_SD1, 10).await;
+
+                // no need for brakes like in cpp since rust is much better 
+                                
+            }
+            DistanceMode::Long =>{
+                                // timing config long range
+
+                self.write_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_A, 0x0F).await;
+                self.write_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_B, 0x0D).await;
+                self.write_reg(regAddr::RANGE_CONFIG__VALID_PHASE_HIGH, 0xB8).await;
+
+
+                // dynamic config
+                self.write_reg(regAddr::SD_CONFIG__WOI_SD0, 0x0F).await;
+                self.write_reg(regAddr::SD_CONFIG__WOI_SD1, 0x0D).await;
+                self.write_reg(regAddr::SD_CONFIG__INITIAL_PHASE_SD0, 14).await;
+                self.write_reg(regAddr::SD_CONFIG__INITIAL_PHASE_SD1, 14).await;
+
+                // no need for brakes like in cpp since rust is much better 
+
+            }
+            DistanceMode::Unknown =>{
+                // unrecognized mode - do nothing
+                return false;
+            }
+            
+        }
+        self.set_mesurement_timing_budget(budget_us).await;
+        self.distance_mode = mode;
+
+        true
+        // todo!()
     }
     
     async fn get_distance_mode(&mut self) -> DistanceMode{
