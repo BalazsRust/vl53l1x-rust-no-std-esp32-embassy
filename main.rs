@@ -1585,7 +1585,7 @@ impl  Vl53l1x{
         let macro_period_us : u32 =  self.calc_macro_period(value).await;
 
 
-        let mut  phasecal_timeout_mclks = self.timeout_microseconds_to_mclks(1000, macro_period_us).await;
+        let mut  phasecal_timeout_mclks: u32 = self.timeout_microseconds_to_mclks(1000, macro_period_us).await;
 
         if phasecal_timeout_mclks > 0xFF{
             phasecal_timeout_mclks = 0xFF
@@ -1647,39 +1647,172 @@ impl  Vl53l1x{
 
 
     async fn get_mesurement_timing_budget(&mut self)-> u32{
+        // assumes PresetMode is LOWPOWER_AUTONOMOUS and these sequence steps are
+        // enabled: VHV, PHASECAL, DSS1, RANGE
+
+        // VL53L1_get_timeouts_us() begin
+
+        // "Update Macro Period for Range A VCSEL Period"
+
+        let range_vscel_config_value = self.read_reg(regAddr::RANGE_CONFIG__VCSEL_PERIOD_A).await;
+        let macro_period_us = self.calc_macro_period(range_vscel_config_value).await;
+
+        // "Get Range Timing A timeout"
+        let a = self.read_reg_16_bit(regAddr::RANGE_CONFIG__TIMEOUT_MACROP_A).await;
+        let b = self.decode_timeout(a).await;
+        let range_config_timeout_us = self.timeout_microseconds_to_mclks(b, macro_period_us).await;
+
+
+
+        return 2 * range_config_timeout_us + Timing_Guard;
+
+    }
+
+    async fn set_roi_size(&mut self,mut width:u8,mut height:u8){
+        if ( width > 16) {  width = 16; }
+        if (height > 16) { height = 16; }
+      
+        if width > 10 || height > 10{
+            self.write_reg(regAddr::ROI_CONFIG__MODE_ROI_CENTRE_SPAD, 199).await;
+        }
+
+        self.write_reg(regAddr::ROI_CONFIG__MODE_ROI_XY_SIZE, (height - 1) << 4 | (width -1)).await;
+
         todo!()
     }
 
-    async fn set_roi_size(&mut self,width:u8,height:u8){
-        todo!()
+    async fn get_roi_size(&mut self,width : &mut u8, height: &mut u8){
+        let reg_val : u8 = self.read_reg(regAddr::GPH__ROI_CONFIG__USER_ROI_REQUESTED_GLOBAL_XY_SIZE).await;
+        *width = (reg_val & 0xF) + 1;
+        *height = (reg_val >> 4) + 1;
+
+// Set the center SPAD of the region of interest (ROI)
+// based on VL53L1X_SetROICenter() from STSW-IMG009 Ultra Lite Driver
+//
+// ST user manual UM2555 explains ROI selection in detail, so we recommend
+// reading that document carefully. Here is a table of SPAD locations from
+// UM2555 (199 is the default/center):
+//
+// 128,136,144,152,160,168,176,184,  192,200,208,216,224,232,240,248
+// 129,137,145,153,161,169,177,185,  193,201,209,217,225,233,241,249
+// 130,138,146,154,162,170,178,186,  194,202,210,218,226,234,242,250
+// 131,139,147,155,163,171,179,187,  195,203,211,219,227,235,243,251
+// 132,140,148,156,164,172,180,188,  196,204,212,220,228,236,244,252
+// 133,141,149,157,165,173,181,189,  197,205,213,221,229,237,245,253
+// 134,142,150,158,166,174,182,190,  198,206,214,222,230,238,246,254
+// 135,143,151,159,167,175,183,191,  199,207,215,223,231,239,247,255
+//
+// 127,119,111,103, 95, 87, 79, 71,   63, 55, 47, 39, 31, 23, 15,  7
+// 126,118,110,102, 94, 86, 78, 70,   62, 54, 46, 38, 30, 22, 14,  6
+// 125,117,109,101, 93, 85, 77, 69,   61, 53, 45, 37, 29, 21, 13,  5
+// 124,116,108,100, 92, 84, 76, 68,   60, 52, 44, 36, 28, 20, 12,  4
+// 123,115,107, 99, 91, 83, 75, 67,   59, 51, 43, 35, 27, 19, 11,  3
+// 122,114,106, 98, 90, 82, 74, 66,   58, 50, 42, 34, 26, 18, 10,  2
+// 121,113,105, 97, 89, 81, 73, 65,   57, 49, 41, 33, 25, 17,  9,  1
+// 120,112,104, 96, 88, 80, 72, 64,   56, 48, 40, 32, 24, 16,  8,  0 <- Pin 1
+//
+// This table is oriented as if looking into the front of the sensor (or top of
+// the chip). SPAD 0 is closest to pin 1 of the VL53L1X, which is the corner
+// closest to the VDD pin on the Pololu VL53L1X carrier board:
+//
+//   +--------------+
+//   |             O| GPIO1
+//   |              |
+//   |             O|
+//   | 128    248   |
+//   |+----------+ O|
+//   ||+--+  +--+|  |
+//   |||  |  |  || O|
+//   ||+--+  +--+|  |
+//   |+----------+ O|
+//   | 120      0   |
+//   |             O|
+//   |              |
+//   |             O| VDD
+//   +--------------+
+//
+// However, note that the lens inside the VL53L1X inverts the image it sees
+// (like the way a camera works). So for example, to shift the sensor's FOV to
+// sense objects toward the upper left, you should pick a center SPAD in the
+// lower right.
+
+        
     }
+
+
+    async fn set_roi_center(&mut self, spad_num:u8){
+        self.write_reg(regAddr::ROI_CONFIG__MODE_ROI_CENTRE_SPAD, spad_num).await;
+        
+    }
+
+    async fn get_roi_center(&mut self) -> u8{
+        self.read_reg(regAddr::ROI_CONFIG__USER_ROI_CENTRE_SPAD).await
+    }
+
+
+   
     /*
         void getROISize(uint8_t * width, uint8_t * height); C++ -> Rust    fn get_roi_size(&mut self,width : &mut u8, height: &mut u8)
         the * means a pointer but in rust due to memory safety we can't have normal pointers
 
      */
-    async fn get_roi_size(&mut self,width : &mut u8, height: &mut u8){
-        todo!()
-    }
+ 
 
-    async fn set_roi_center(&mut self, spad_num:u8){
-        todo!()
-    }
 
-    async fn get_roi_center(&mut self) -> u8{
-        todo!()
-    }
+    async fn start_continuous(&mut self, period_ms:u32){
+        /*
+        C++ CAN DO SOME WIERD SHIT FOR EXAMPLE WHEN YOU MUILTIPLY A u32 with a u16 it will make it so u32 * (u16 as u32) IT FUCKING CONVERTS SMALLER DATA TYPE TO THE BIGGER ONE
+         */
+        self.write_reg_32_bit(regAddr::SYSTEM__INTERMEASUREMENT_PERIOD, period_ms * (self.osc_calibrate_val as u32)).await;
 
-    async fn start_continuous(&mut self, period_ms:u8){
-        todo!()
+        self.write_reg(regAddr::SYSTEM__INTERRUPT_CLEAR, 0x01).await;
+        self.write_reg(regAddr::SYSTEM__MODE_START, 0x40).await;
+
     }
 
     async fn stop_continous(&mut self){
-        todo!()
+        self.write_reg(regAddr::SYSTEM__MODE_START, 0x80).await; // mode_range_abort
+
+        self.calibrated = false;
+
+        if self.saved_vhv_init != 0{
+            self.write_reg(regAddr::VHV_CONFIG__INIT, self.saved_vhv_init).await;
+        }
+        if self.saved_vhv_timeout != 0{
+            self.write_reg(regAddr::VHV_CONFIG__TIMEOUT_MACROP_LOOP_BOUND, self.saved_vhv_timeout).await;
+        }
+
+        // "remove phasecal override"
+        self.write_reg(regAddr::PHASECAL_CONFIG__OVERRIDE, 0x00).await;
     }
 
     async fn read(&mut self, blocking:bool) -> u16{
-        todo!()
+        if blocking{
+            let start_time = embassy_time::Instant::now();
+            while !self.data_ready().await{
+                let elapsed: Duration = embassy_time::Instant::now() - start_time;
+                let e = elapsed.as_millis();
+                if ((self.io_timeout) as u64 > 0 ) && e > (self.io_timeout as u64){
+                    self.did_timeout = true;
+                    return 0;
+                }
+            }
+        }
+        self.read_results().await;
+
+        if !self.calibrated{
+            self.setup_manual_calibration().await;
+            self.calibrated = true;
+        }
+
+        self.update_dss().await;
+        self.get_ranging_data().await;
+
+        self.write_reg(regAddr::SYSTEM__INTERRUPT_CLEAR, 0x01).await;
+        return self.range_mm;
+
+        
+        
     }
 
     async fn read_range_continous_milimeters(&mut self,blocking:bool ) -> u16{
@@ -1689,12 +1822,23 @@ impl  Vl53l1x{
     async fn read_single(&mut self,blocking:bool) -> u16{
         todo!()
     }
+    async fn read_results(&mut self){
+        todo!()
+    }
 
     async fn read_range_single_milimeters(&mut self,blocking:bool) -> u16{
         self.read_single(blocking).await
 
     }
-
+    async fn get_ranging_data(&mut self) {
+        todo!()
+    }
+    async fn update_dss(&mut self) {
+        todo!()
+    }
+    async fn setup_manual_calibration(&mut self){
+        todo!()
+    }
     async fn data_ready(&mut self) -> bool{
         (self.read_reg(regAddr::GPIO__TIO_HV_STATUS ).await & 0x01) == 0
     }
@@ -1717,7 +1861,9 @@ impl  Vl53l1x{
     async fn time_out_accured(&mut self) -> bool{
         todo!()
     }
-
+    async fn decode_timeout(&mut self,reg_val : u16) -> u32{
+        todo!()
+    }
 
 
 }
