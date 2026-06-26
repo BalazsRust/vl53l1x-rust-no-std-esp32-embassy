@@ -1820,9 +1820,26 @@ impl  Vl53l1x{
     }
 
     async fn read_single(&mut self,blocking:bool) -> u16{
+        
+        self.write_reg(regAddr::SYSTEM__INTERRUPT_CLEAR, 0x01).await;
+        self.write_reg(regAddr::SYSTEM__MODE_START, 0x10).await;
+
+        if blocking{
+            return self.read(true).await;
+        }else{
+            return 0;
+        }
         todo!()
     }
     async fn read_results(&mut self){
+        let mut buffer = [0u8;17];
+        self.vl53l1x_i2c.write_read_async(self.address, &[(regAddr::RESULT__RANGE_STATUS >> 8) as u8, // reg high byte
+         regAddr::RESULT__RANGE_STATUS as u8], // reg low byte
+         &mut buffer).await; // reading the value into buffer 
+        
+        CONTINUE FROM 676  from cpp
+
+
         todo!()
     }
 
@@ -1837,6 +1854,19 @@ impl  Vl53l1x{
         todo!()
     }
     async fn setup_manual_calibration(&mut self){
+        let saved_vhv_init = self.read_reg(regAddr::VHV_CONFIG__INIT).await;
+        let saved_vhv_timeout = self.read_reg(regAddr::VHV_CONFIG__TIMEOUT_MACROP_LOOP_BOUND).await;
+
+        self.write_reg(regAddr::VHV_CONFIG__INIT, saved_vhv_init & 0x7F).await;
+
+        self.write_reg(regAddr::VHV_CONFIG__TIMEOUT_MACROP_LOOP_BOUND, (saved_vhv_init & 0x03) + (3 << 2)).await; // tuning parm default (LowpowerAuto_VHV_BOund_Defualt)
+
+        self.write_reg(regAddr::PHASECAL_CONFIG__OVERRIDE, 0x01).await;
+
+        let a = self.read_reg(regAddr::PHASECAL_RESULT__VCSEL_START).await;
+        self.write_reg(regAddr::CAL_CONFIG__VCSEL_START, a).await;
+
+
         todo!()
     }
     async fn data_ready(&mut self) -> bool{
@@ -1846,8 +1876,53 @@ impl  Vl53l1x{
     
         static const char * rangeStatusToString(RangeStatus status); C++ ->> RUST  fn range_status_to_string(&mut self,status:RangeStatus) -> &'static str
      */
+
+
     async fn range_status_to_string(&mut self,status:RangeStatus) -> &'static str{
-        todo!()
+
+        match status{
+            RangeStatus::RangeValid =>{
+                return "range valid";
+            }
+            RangeStatus::SigmaFail =>{
+                return "sigma fail";
+            }
+            RangeStatus::SignalFail =>{
+                return "signal fail";
+            }
+            RangeStatus::RangeValidMinRangeClipped =>{
+                return "range valid, min range clipped";
+            }
+            RangeStatus::OutOfBoundsFail =>{
+                return "out of bounds fail";
+            }
+            RangeStatus::HardwareFail =>{
+                return "hardware fail";
+            }
+            RangeStatus::RangeValidNoWrapCheckFail =>{
+                return "range valid, no wrap check fail";
+
+            }
+            RangeStatus::WrapTargetFail =>{
+                return "wrap target fail";
+            }
+            RangeStatus::XtalkSignalFail =>{
+                return "xtalk signal fail";
+            }
+            RangeStatus::SynchronizationInt =>{
+                return "synchronization int"
+            }
+            RangeStatus::MinRangeFail =>{
+                return "min range fail"
+            }
+            RangeStatus::None =>{
+                return "no update";
+            }
+            _ =>{
+              return   "unknown status";
+            }
+        }
+        
     }
 
     async fn set_timeout(&mut self,timeout:u16){
@@ -1859,7 +1934,9 @@ impl  Vl53l1x{
     }
 
     async fn time_out_accured(&mut self) -> bool{
-        todo!()
+        let tmp : bool = self.did_timeout;
+        self.did_timeout = false;
+        tmp
     }
     async fn decode_timeout(&mut self,reg_val : u16) -> u32{
         todo!()
