@@ -1503,6 +1503,7 @@ impl  Vl53l1x{
 
 
     async fn check_time_out_expired(&mut self) ->bool{
+        FIX FROM HERE 
         todo!()
     }
 
@@ -2041,7 +2042,7 @@ impl  Vl53l1x{
         self.write_reg(regAddr::CAL_CONFIG__VCSEL_START, a).await;
 
 
-        todo!()
+
     }
     async fn data_ready(&mut self) -> bool{
         (self.read_reg(regAddr::GPIO__TIO_HV_STATUS ).await & 0x01) == 0
@@ -2113,7 +2114,7 @@ impl  Vl53l1x{
         tmp
     }
     async fn decode_timeout(&mut self,reg_val : u16) -> u32{
-        todo!()
+        (((reg_val & 0xff) as  u32 ) << (reg_val >> 8)) + 1
     }
 
 
