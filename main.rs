@@ -1293,6 +1293,15 @@ struct Vl53l1x{
     saved_vhv_init:u8,
     saved_vhv_timeout:u8,
 
+    // Result buffer atributes
+
+    result_buffer_range_status:u8,
+    result_buffer_stream_count : u8,
+    result_buffer_dss_actual_effective_spads_sd0:u16,
+    result_buffer_ambient_count_rate_mcps_sd0:u16,
+    result_buffer_final_crosstalk_corrected_range_mm_sd0:u16,
+    result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0:u16
+    
 
 }
 
@@ -1303,7 +1312,8 @@ impl  Vl53l1x{
         Self { vl53l1x_i2c, range_mm: 0, peak_signal_count_rate_mcps: 0.0,
                ambient_count_rate_mcps: 0.0, range_status: RangeStatus::None,
                init: true, distance_mode, blocking: true,io_timeout:0,
-            address:0,did_timeout:false,timeout_start_ms:0,fast_osc_frequency:0,osc_calibrate_val:0,calibrated:false,saved_vhv_init:0,saved_vhv_timeout:0}
+            address:0,did_timeout:false,timeout_start_ms:0,fast_osc_frequency:0,osc_calibrate_val:0,calibrated:false,saved_vhv_init:0,saved_vhv_timeout:0,
+        result_buffer_ambient_count_rate_mcps_sd0:0,result_buffer_dss_actual_effective_spads_sd0:0,result_buffer_final_crosstalk_corrected_range_mm_sd0:0,result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0:0,result_buffer_range_status:0,result_buffer_stream_count:0}
     }
 
 
@@ -1837,10 +1847,44 @@ impl  Vl53l1x{
          regAddr::RESULT__RANGE_STATUS as u8], // reg low byte
          &mut buffer).await; // reading the value into buffer 
         
-        CONTINUE FROM 676  from cpp
+        let range_status = buffer[0];
+        self.result_buffer_range_status = range_status;
 
 
-        todo!()
+        let stream_count = buffer[2];
+        self.result_buffer_stream_count = stream_count;
+
+        
+
+        let dss_actual_effective_spads_high = (buffer[3] as u16) << 8;
+        self.result_buffer_dss_actual_effective_spads_sd0 = dss_actual_effective_spads_high;
+
+        let dss_actual_effective_spads_low = buffer[4];
+        self.result_buffer_dss_actual_effective_spads_sd0 |= dss_actual_effective_spads_low as u16;
+
+        let ambient_count_rate_high = buffer[7];
+        self.result_buffer_ambient_count_rate_mcps_sd0 = (ambient_count_rate_high as u16) << 8;
+        let ambient_count_rate_low = buffer[8];
+        self.result_buffer_ambient_count_rate_mcps_sd0 |= ambient_count_rate_low as u16;
+
+
+        
+        let final_range_high = buffer[13];
+        self.result_buffer_final_crosstalk_corrected_range_mm_sd0 = (final_range_high as u16) <<8;
+        let final_range_low = buffer[14];
+        self.result_buffer_final_crosstalk_corrected_range_mm_sd0 |= final_range_low as u16;
+
+
+        let peak_signal_high = buffer[15];
+        self.result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0 = (peak_signal_high as u16) << 8;
+        let peak_signal_low = buffer[16];
+        self.result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0 |= peak_signal_low as u16;
+
+
+        
+        
+
+        
     }
 
     async fn read_range_single_milimeters(&mut self,blocking:bool) -> u16{
@@ -1851,6 +1895,7 @@ impl  Vl53l1x{
         todo!()
     }
     async fn update_dss(&mut self) {
+        Contine from line 706
         todo!()
     }
     async fn setup_manual_calibration(&mut self){
