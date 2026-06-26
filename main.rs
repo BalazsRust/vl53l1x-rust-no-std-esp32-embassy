@@ -2,6 +2,8 @@
 #![no_main]
 
 
+use core::ops::Range;
+
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
@@ -10,7 +12,7 @@ use esp_hal::i2c::master::{Config, I2c};
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
-use regAddr::{Timing_Guard, ALGO__CONSISTENCY_CHECK__TOLERANCE, ALGO__PART_TO_PART_RANGE_OFFSET_MM, ALGO__RANGE_IGNORE_VALID_HEIGHT_MM, ALGO__RANGE_MIN_CLIP, DSS_CONFIG__APERTURE_ATTENUATION, GPIO__TIO_HV_STATUS, I2C_SLAVE__DEVICE_ADDRESS, MM_CONFIG__OUTER_OFFSET_MM, OSC_MEASURED__FAST_OSC__FREQUENCY, SIGMA_ESTIMATOR__EFFECTIVE_AMBIENT_WIDTH_NS, SIGMA_ESTIMATOR__EFFECTIVE_PULSE_WIDTH_NS, SYSTEM__THRESH_RATE_HIGH, SYSTEM__THRESH_RATE_LOW_LO};
+use regAddr::{Target_Rate, Timing_Guard, ALGO__CONSISTENCY_CHECK__TOLERANCE, ALGO__PART_TO_PART_RANGE_OFFSET_MM, ALGO__RANGE_IGNORE_VALID_HEIGHT_MM, ALGO__RANGE_MIN_CLIP, DSS_CONFIG__APERTURE_ATTENUATION, GPIO__TIO_HV_STATUS, I2C_SLAVE__DEVICE_ADDRESS, MM_CONFIG__OUTER_OFFSET_MM, OSC_MEASURED__FAST_OSC__FREQUENCY, SIGMA_ESTIMATOR__EFFECTIVE_AMBIENT_WIDTH_NS, SIGMA_ESTIMATOR__EFFECTIVE_PULSE_WIDTH_NS, SYSTEM__THRESH_RATE_HIGH, SYSTEM__THRESH_RATE_LOW_LO};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -1644,15 +1646,47 @@ impl  Vl53l1x{
     
 }
 
+    async fn timeout_mclks_to_microseconds(&mut self,timeout_mclks:u32,macro_period_us:u32) -> u32{
+        (((timeout_mclks as u64) * (macro_period_us as u64) + (0x800) as u64) >> 12) as u32
+
+    }
+
     async  fn encode_timeout(&mut self, timeout_mclks : u32) -> u16{
-        todo!()
+        
+        let mut ls_byte :u32 = 0;
+        let mut ms_byte :u16 = 0;
+
+        if timeout_mclks > 0{
+            ls_byte = timeout_mclks -1;
+            while (ls_byte & 0xFFFFFF00) > 0{
+                ls_byte >>= 1;
+                ms_byte += 1;
+            }
+            return  (ms_byte << 8) | ((ls_byte & 0xFF) as u16);
+        }else{
+            return 0;
+        }
+
+
     }
 
     async fn timeout_microseconds_to_mclks(&mut self, timeout_us : u32,macro_period_us : u32) -> u32{
-        todo!()
+            ((((timeout_us <<12 ) as u32) + ((macro_period_us >> 1) as u32)) / macro_period_us) as u32
+
     }
     async fn calc_macro_period(&mut self , vcsel_period: u8) -> u32{
-        todo!()
+        let pll_period_us : u32 = ((0x01 <<30)  / (self.fast_osc_frequency as u32)) as u32;
+
+        let vcsel_period_pclks: u8 = (vcsel_period + 1) << 1;
+
+        let mut macro_pariod_us : u32 = (2304 * pll_period_us) as u32;
+        macro_pariod_us >>= 6;
+        macro_pariod_us *= (vcsel_period_pclks as u32);
+        macro_pariod_us >>= 6;
+
+        macro_pariod_us
+
+
     }
 
 
@@ -1757,8 +1791,10 @@ impl  Vl53l1x{
 
     async fn get_roi_center(&mut self) -> u8{
         self.read_reg(regAddr::ROI_CONFIG__USER_ROI_CENTRE_SPAD).await
+        
     }
 
+    
 
    
     /*
@@ -1892,11 +1928,104 @@ impl  Vl53l1x{
 
     }
     async fn get_ranging_data(&mut self) {
-        todo!()
+        let mut range  = self.result_buffer_final_crosstalk_corrected_range_mm_sd0;
+
+    // "apply correction gain"
+    // gain factor of 2011 is tuning parm default (VL53L1_TUNINGPARM_LITE_RANGING_GAIN_FACTOR_DEFAULT)
+    // Basically, this appears to scale the result by 2011/2048, or about 98%
+    // (with the 1024 added for proper rounding).
+        self.range_mm = (((range as u32) * 2011 + (0x0400 as u32)) / (0x0800 as u32) ) as u16;
+
+  // VL53L1_copy_sys_and_core_results_to_range_results() end
+
+  // set range_status in ranging_data based on value of RESULT__RANGE_STATUS register
+  // mostly based on ConvertStatusLite()
+
+        match self.result_buffer_range_status{
+            17 =>{self.range_status = RangeStatus::HardwareFail;} //MULTCLIPFAIL
+            2 =>{self.range_status = RangeStatus::HardwareFail;}  // VCSELWATCHDOGTESTFAILURE
+            1 => {self.range_status = RangeStatus::HardwareFail;} // VCSELCONTINUITYTESTFAILURE
+            3 =>{self.range_status = RangeStatus::HardwareFail;} // NOVHVVALUEFOUND
+            
+            13 =>{ // USERROICLIP
+                self.range_status = RangeStatus::MinRangeFail;
+            }
+            18 =>{
+                self.range_status = RangeStatus::SynchronizationInt;
+            }
+            5 =>{
+                self.range_status = RangeStatus::OutOfBoundsFail;
+            }
+            4 =>{
+                self.range_status = RangeStatus::SignalFail;
+            }
+            6 =>{
+                self.range_status = RangeStatus::SigmaFail;
+            }
+            7 =>{
+                self.range_status = RangeStatus::WrapTargetFail;
+            }
+            12 =>{
+                self.range_status = RangeStatus::XtalkSignalFail;
+            }
+            8 =>{
+                self.range_status = RangeStatus::RangeValidMinRangeClipped;
+            }
+            9 =>{
+                if self.result_buffer_stream_count == 0{
+                    self.range_status = RangeStatus::RangeValidNoWrapCheckFail;
+                }else{
+                    self.range_status = RangeStatus::RangeValid;
+
+                }
+            }
+            _=>{
+                self.range_status = RangeStatus::None;
+            }
+        }
+        self.peak_signal_count_rate_mcps = self.count_rate_fixed_to_float(self.result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0).await;
+        self.ambient_count_rate_mcps = self.count_rate_fixed_to_float(self.result_buffer_ambient_count_rate_mcps_sd0).await;
+
     }
     async fn update_dss(&mut self) {
-        Contine from line 706
-        todo!()
+        let spad_count :u16 = self.result_buffer_dss_actual_effective_spads_sd0;
+        if spad_count != 0{
+            // "Calc total rate per spad"
+
+            let mut total_rate_per_spad : u32 = self.result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0 as u32 + self.result_buffer_ambient_count_rate_mcps_sd0 as u32;
+
+            if total_rate_per_spad > 0xFFFF{
+                total_rate_per_spad = 0xFFFF
+            }
+            // "shift up to take advantage of 32 bits"
+            total_rate_per_spad <<= 16;
+            total_rate_per_spad /= (spad_count as u32);
+
+            if total_rate_per_spad != 0{
+                // clip to 16 bit
+                let mut required_spads = ((regAddr::Target_Rate as u32) << 16) / total_rate_per_spad;
+                if required_spads > 0xFFFF {
+                    required_spads = 0xFFFF
+                }
+
+                self.write_reg_16_bit(regAddr::DSS_CONFIG__MANUAL_EFFECTIVE_SPADS_SELECT, required_spads as u16).await;
+                return;
+            }
+
+                    // If we reached this point, it means something above would have resulted in a
+        // divide by zero.
+        // "We want to gracefully set a spad target, not just exit with an error"
+
+        // "set target to mid point"
+    }
+    self.write_reg_16_bit(regAddr::DSS_CONFIG__MANUAL_EFFECTIVE_SPADS_SELECT, 0x8000).await;
+
+
+
+
+    }
+    async fn count_rate_fixed_to_float(&mut self , count_rate_fixed:u16) -> f64{
+        (count_rate_fixed as f64) / ((1 <<7) as f64)
     }
     async fn setup_manual_calibration(&mut self){
         let saved_vhv_init = self.read_reg(regAddr::VHV_CONFIG__INIT).await;
