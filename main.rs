@@ -8,6 +8,7 @@ use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio::{Output, OutputConfig};
 use esp_hal::i2c::master::{Config, I2c};
 use esp_hal::time::{Instant, Rate};
 use esp_hal::timer::timg::TimerGroup;
@@ -1277,6 +1278,7 @@ pub enum RangeStatus{
 
 struct Vl53l1x{
     vl53l1x_i2c: I2c<'static, esp_hal::Async>,
+    xshut: Output<'static>,
     range_mm : u16,
     range_status : RangeStatus,
     peak_signal_count_rate_mcps : f64,
@@ -1314,8 +1316,8 @@ struct Vl53l1x{
 
 
 impl  Vl53l1x{
-    async fn new(vl53l1x_i2c: I2c<'static, esp_hal::Async>, distance_mode: DistanceMode) -> Self {
-        Self { vl53l1x_i2c, range_mm: 0, peak_signal_count_rate_mcps: 0.0,
+    async fn new(vl53l1x_i2c: I2c<'static, esp_hal::Async>, distance_mode: DistanceMode,xshut:Output<'static>) -> Self {
+        Self { vl53l1x_i2c, xshut, range_mm: 0, peak_signal_count_rate_mcps: 0.0,
                ambient_count_rate_mcps: 0.0, range_status: RangeStatus::None,
                init: true, distance_mode, blocking: true,io_timeout:0,
             address:0x29,did_timeout:false,timeout_start_ms:0,fast_osc_frequency:0,osc_calibrate_val:0,calibrated:false,saved_vhv_init:0,saved_vhv_timeout:0,
@@ -1427,6 +1429,12 @@ impl  Vl53l1x{
     }
 
     async fn init(&mut self,io_2v8:bool) ->bool{
+        self.xshut.set_low();
+        Timer::after(Duration::from_millis(10)).await;
+        self.xshut.set_high();
+        Timer::after(Duration::from_millis(10)).await; // boot time
+
+
         // todo!() // here change the self.init to the io_2v8 value
         if self.read_reg_16_bit(regAddr::IDENTIFICATION__MODEL_ID).await != 0xEACC{
             return false
@@ -2155,9 +2163,10 @@ async fn main(spawner: Spawner) {
     let vl53l1x_i2c: I2c<'static, esp_hal::Async> = I2c::new(peripherals.I2C0, Config::default().with_frequency(Rate::from_khz(400))
 ).unwrap().with_scl(peripherals.GPIO22).with_sda(peripherals.GPIO21).into_async();
 
+    let xshut: Output<'static> = Output::new(peripherals.GPIO2, esp_hal::gpio::Level::Low, OutputConfig::default());
 info!("before vl53l1x");
 
-    let mut vl53l1x = Vl53l1x::new(vl53l1x_i2c, DistanceMode::Long).await;
+    let mut vl53l1x = Vl53l1x::new(vl53l1x_i2c, DistanceMode::Long,xshut).await;
     vl53l1x.init(true).await;
     vl53l1x.set_distance_mode(DistanceMode::Long).await;
     vl53l1x.set_mesurement_timing_budget(200_000).await;
@@ -2168,7 +2177,7 @@ info!("before vl53l1x");
     loop {
         let sensor_data: u16 = vl53l1x.read(true).await;
         info!("sensors data is: {}mm \n {}cm",sensor_data,sensor_data / 10);
-        Timer::after(Duration::from_millis(10)).await;
+        // Timer::after(Duration::from_millis(10)).await;
     }
 
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0-beta.0/examples/src/bin
