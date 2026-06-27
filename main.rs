@@ -2160,13 +2160,14 @@ info!("before vl53l1x");
     let mut vl53l1x = Vl53l1x::new(vl53l1x_i2c, DistanceMode::Long).await;
     vl53l1x.init(true).await;
     vl53l1x.set_distance_mode(DistanceMode::Long).await;
-    vl53l1x.set_mesurement_timing_budget(50000).await;
+    vl53l1x.set_mesurement_timing_budget(200_000).await;
 
     vl53l1x.start_continuous(50).await;
 
     info!("after vl53l1x");
     loop {
-        info!("sensors data is: {}",vl53l1x.read(true).await);
+        let sensor_data: u16 = vl53l1x.read(true).await;
+        info!("sensors data is: {}mm \n {}cm",sensor_data,sensor_data / 10);
         Timer::after(Duration::from_millis(10)).await;
     }
 
