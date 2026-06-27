@@ -1302,8 +1302,12 @@ struct Vl53l1x{
     result_buffer_dss_actual_effective_spads_sd0:u16,
     result_buffer_ambient_count_rate_mcps_sd0:u16,
     result_buffer_final_crosstalk_corrected_range_mm_sd0:u16,
-    result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0:u16
+    result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0:u16,
     
+
+    timeout_can_be_started:bool,
+    start_time: embassy_time::Instant,
+
 
 }
 
@@ -1315,7 +1319,8 @@ impl  Vl53l1x{
                ambient_count_rate_mcps: 0.0, range_status: RangeStatus::None,
                init: true, distance_mode, blocking: true,io_timeout:0,
             address:0,did_timeout:false,timeout_start_ms:0,fast_osc_frequency:0,osc_calibrate_val:0,calibrated:false,saved_vhv_init:0,saved_vhv_timeout:0,
-        result_buffer_ambient_count_rate_mcps_sd0:0,result_buffer_dss_actual_effective_spads_sd0:0,result_buffer_final_crosstalk_corrected_range_mm_sd0:0,result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0:0,result_buffer_range_status:0,result_buffer_stream_count:0}
+        result_buffer_ambient_count_rate_mcps_sd0:0,result_buffer_dss_actual_effective_spads_sd0:0,result_buffer_final_crosstalk_corrected_range_mm_sd0:0,result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0:0,result_buffer_range_status:0,
+        result_buffer_stream_count:0,timeout_can_be_started:false,start_time:embassy_time::Instant::now()}
     }
 
 
@@ -1502,10 +1507,6 @@ impl  Vl53l1x{
 
 
 
-    async fn check_time_out_expired(&mut self) ->bool{
-        FIX FROM HERE 
-        todo!()
-    }
 
     async fn set_distance_mode(&mut self,mode:DistanceMode) -> bool{
 
@@ -1833,13 +1834,26 @@ impl  Vl53l1x{
         self.write_reg(regAddr::PHASECAL_CONFIG__OVERRIDE, 0x00).await;
     }
 
+    async fn check_time_out_expired(&mut self) ->bool{
+        let start_time = self.start_time;
+        let elapsed: Duration = embassy_time::Instant::now() - start_time;
+        let e = elapsed.as_millis();
+        if ((self.io_timeout) as u64 > 0 ) && e > (self.io_timeout as u64){
+           return true
+    }
+     false
+}
+    
+    async fn start_timeout(&mut self){
+        self.start_time = embassy_time::Instant::now();
+    }
+
     async fn read(&mut self, blocking:bool) -> u16{
         if blocking{
-            let start_time = embassy_time::Instant::now();
+            self.start_timeout().await;
             while !self.data_ready().await{
-                let elapsed: Duration = embassy_time::Instant::now() - start_time;
-                let e = elapsed.as_millis();
-                if ((self.io_timeout) as u64 > 0 ) && e > (self.io_timeout as u64){
+                
+                if self.check_time_out_expired().await{
                     self.did_timeout = true;
                     return 0;
                 }
