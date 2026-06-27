@@ -1318,7 +1318,7 @@ impl  Vl53l1x{
         Self { vl53l1x_i2c, range_mm: 0, peak_signal_count_rate_mcps: 0.0,
                ambient_count_rate_mcps: 0.0, range_status: RangeStatus::None,
                init: true, distance_mode, blocking: true,io_timeout:0,
-            address:0,did_timeout:false,timeout_start_ms:0,fast_osc_frequency:0,osc_calibrate_val:0,calibrated:false,saved_vhv_init:0,saved_vhv_timeout:0,
+            address:0x29,did_timeout:false,timeout_start_ms:0,fast_osc_frequency:0,osc_calibrate_val:0,calibrated:false,saved_vhv_init:0,saved_vhv_timeout:0,
         result_buffer_ambient_count_rate_mcps_sd0:0,result_buffer_dss_actual_effective_spads_sd0:0,result_buffer_final_crosstalk_corrected_range_mm_sd0:0,result_buffer_peak_signal_count_rate_crosstalk_corrected_mcps_sd0:0,result_buffer_range_status:0,
         result_buffer_stream_count:0,timeout_can_be_started:false,start_time:embassy_time::Instant::now()}
     }
@@ -1437,7 +1437,7 @@ impl  Vl53l1x{
           // give it some time to boot; otherwise the sensor NACKs during the read_reg()
         Timer::after(Duration::from_secs(1)).await;
 
-        Instant::now();
+        self.start_time = embassy_time::Instant::now();
 
         while (self.read_reg(regAddr::FIRMWARE__SYSTEM_STATUS).await & 0x01) == 0{
             if self.check_time_out_expired().await{
@@ -1677,8 +1677,8 @@ impl  Vl53l1x{
 
     }
     async fn calc_macro_period(&mut self , vcsel_period: u8) -> u32{
-        let pll_period_us : u32 = ((0x01 <<30)  / (self.fast_osc_frequency as u32)) as u32;
-
+        if self.fast_osc_frequency == 0 { return 0; }
+        let pll_period_us = (0x01u32 << 30) / (self.fast_osc_frequency as u32);
         let vcsel_period_pclks: u8 = (vcsel_period + 1) << 1;
 
         let mut macro_pariod_us : u32 = (2304 * pll_period_us) as u32;
@@ -1724,7 +1724,7 @@ impl  Vl53l1x{
 
         self.write_reg(regAddr::ROI_CONFIG__MODE_ROI_XY_SIZE, (height - 1) << 4 | (width -1)).await;
 
-        todo!()
+
     }
 
     async fn get_roi_size(&mut self,width : &mut u8, height: &mut u8){
@@ -1890,7 +1890,7 @@ impl  Vl53l1x{
         }else{
             return 0;
         }
-        todo!()
+        
     }
     async fn read_results(&mut self){
         let mut buffer = [0u8;17];
@@ -2043,12 +2043,13 @@ impl  Vl53l1x{
         (count_rate_fixed as f64) / ((1 <<7) as f64)
     }
     async fn setup_manual_calibration(&mut self){
-        let saved_vhv_init = self.read_reg(regAddr::VHV_CONFIG__INIT).await;
-        let saved_vhv_timeout = self.read_reg(regAddr::VHV_CONFIG__TIMEOUT_MACROP_LOOP_BOUND).await;
 
-        self.write_reg(regAddr::VHV_CONFIG__INIT, saved_vhv_init & 0x7F).await;
+        self.saved_vhv_init = self.read_reg(regAddr::VHV_CONFIG__INIT).await;
+        self.saved_vhv_timeout = self.read_reg(regAddr::VHV_CONFIG__TIMEOUT_MACROP_LOOP_BOUND).await;
+        self.write_reg(regAddr::VHV_CONFIG__INIT, self.saved_vhv_init & 0x7F).await;
 
-        self.write_reg(regAddr::VHV_CONFIG__TIMEOUT_MACROP_LOOP_BOUND, (saved_vhv_init & 0x03) + (3 << 2)).await; // tuning parm default (LowpowerAuto_VHV_BOund_Defualt)
+        self.write_reg(regAddr::VHV_CONFIG__TIMEOUT_MACROP_LOOP_BOUND,(self.saved_vhv_timeout & 0x03) + (3 << 2)).await;
+         // tuning parm default (LowpowerAuto_VHV_BOund_Defualt)
 
         self.write_reg(regAddr::PHASECAL_CONFIG__OVERRIDE, 0x01).await;
 
@@ -2154,12 +2155,19 @@ async fn main(spawner: Spawner) {
     let vl53l1x_i2c: I2c<'static, esp_hal::Async> = I2c::new(peripherals.I2C0, Config::default().with_frequency(Rate::from_khz(400))
 ).unwrap().with_scl(peripherals.GPIO22).with_sda(peripherals.GPIO21).into_async();
 
+info!("before vl53l1x");
 
+    let mut vl53l1x = Vl53l1x::new(vl53l1x_i2c, DistanceMode::Long).await;
+    vl53l1x.init(true).await;
+    vl53l1x.set_distance_mode(DistanceMode::Long).await;
+    vl53l1x.set_mesurement_timing_budget(50000).await;
 
+    vl53l1x.start_continuous(50).await;
 
+    info!("after vl53l1x");
     loop {
-        info!("Hello world!");
-        Timer::after(Duration::from_secs(1)).await;
+        info!("sensors data is: {}",vl53l1x.read(true).await);
+        Timer::after(Duration::from_millis(10)).await;
     }
 
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0-beta.0/examples/src/bin
