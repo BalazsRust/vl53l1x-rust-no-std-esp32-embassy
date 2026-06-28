@@ -1681,6 +1681,7 @@ impl  Vl53l1x{
     }
 
     async fn timeout_microseconds_to_mclks(&mut self, timeout_us : u32,macro_period_us : u32) -> u32{
+        if macro_period_us == 0 { return 0; } 
             ((((timeout_us <<12 ) as u32) + ((macro_period_us >> 1) as u32)) / macro_period_us) as u32
 
     }
@@ -1865,6 +1866,10 @@ impl  Vl53l1x{
                     self.did_timeout = true;
                     return 0;
                 }
+            }
+        }else{
+            if !self.data_ready().await{
+                return  self.range_mm;
             }
         }
         self.read_results().await;
@@ -2167,16 +2172,21 @@ async fn main(spawner: Spawner) {
 info!("before vl53l1x");
 
     let mut vl53l1x = Vl53l1x::new(vl53l1x_i2c, DistanceMode::Long,xshut).await;
-    vl53l1x.init(true).await;
+    vl53l1x.set_timeout(500).await;   
+    if !vl53l1x.init(true).await {
+        info!("VL53L1X init failed !! check wiring");
+       
+    }
     vl53l1x.set_distance_mode(DistanceMode::Long).await;
     vl53l1x.set_mesurement_timing_budget(200_000).await;
 
-    vl53l1x.start_continuous(50).await;
+    vl53l1x.start_continuous(250).await;
 
     info!("after vl53l1x");
     loop {
-        let sensor_data: u16 = vl53l1x.read(true).await;
+        let sensor_data: u16 = vl53l1x.read(false).await;
         info!("sensors data is: {}mm \n {}cm",sensor_data,sensor_data / 10);
+
         // Timer::after(Duration::from_millis(10)).await;
     }
 
